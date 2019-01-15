@@ -1,0 +1,413 @@
+---
+title: 'TP n°3 - Modèle de régression Ridge et Lasso & Agrégation de modèles'
+author: "Salim Nadir et Guillaume Ostrom"
+output: pdf_document
+---
+*** 
+# Application I : Régression Ridge et Lasso
+
+## Analyse préliminaire
+
+Chargement du fichiers **usa_indicators.txt**:
+```{r}
+setwd("D:\\Centrale\\OMA\\SDMA\\TP3\\")
+usaIndicator = read.table('usa_indicators.txt', sep = ';', header = T)
+nrow(usaIndicator)
+ncol(usaIndicator) 
+```
+On observe 14 observations pour 110 variables. Ce n'est pas un problème de régression évident, car la dimension est supérieure largement au nombre d'observations. On note un risque important d'overfitting. C'est le fléau de la dimension. Il faut donc regarder les méthodes de Ridge et Lasso, car ces méthodes vont introduire des critères de pénalisation pour les coefficients.
+
+La variable contenant la quantité de CO2 émise par an est **EN.ATM.CO2E.KT**
+```{r}
+CO2 = as.matrix(usaIndicator["EN.ATM.CO2E.KT"])
+plot(usaIndicator$Year, CO2)
+```
+
+Les données étant de nature très diverse, les ordres de grandeur peuvent varier d'un indicateur à l'autre. Le coefficient de régression associéé risque à l'inverse d'être d'ordre de grandeur très faible, ce qui pourrait impliquer à tort qu'une variable importante ne l'est pas.
+La régression peut donc être impactée, nous allons devoir normaliser les données.
+```{r}
+usaIndicatorScale = as.data.frame(scale(usaIndicator, center=FALSE))
+```
+
+## Régression Ridge
+
+### 1. Définition régression de type Ridge
+
+La méthode de régression de type Ridge revient à trouver :
+$$ \widehat{\beta}_{RR} = \mathrm{argmin}_{\beta} (\Vert Y - X \beta \Vert_2^2 + \lambda \Vert\beta\Vert_2^2) $$
+avec $\lambda>0$, un paramètre fixé. On va chercher une valeur optimale de $\lambda$ par cross validation.
+
+```{r}
+library(MASS)
+```
+
+### 2. Régression de Ridge pour $\lambda=0$ et $\lambda=100$
+
+On récupéres les 5 coefficients les plus influents pour des régressions de Ridge pour $\lambda=0$ et $\lambda=100$.
+```{r}
+# Retrait de la colonne Year
+usaIndicatorScale = subset(usaIndicatorScale, select = -Year)
+# Ridge Lambda 0
+resridge0 = lm.ridge(EN.ATM.CO2E.KT~., lambda = 0, data = usaIndicatorScale)
+coef0 = coef(resridge0)
+coef0_2 = resridge0$coef
+# Ridge Lambda 100
+resridge100 = lm.ridge(EN.ATM.CO2E.KT~., lambda = 100, data = usaIndicatorScale)
+coef100 =coef(resridge100)
+coef100_2 = resridge100$coef
+# Ridge
+sort0 = as.data.frame(sort(abs(coef0), decreasing = T)[1:6])
+sort100 = as.data.frame(sort(abs(coef100), decreasing = T)[1:6])
+print(sort0)
+print(sort100)
+
+```
+
+Les 5 indicateurs qui sont les plus influents pour un paramètre $\lambda=0$:  
+- Superficie de terrain (AG.LND.TOTL.K2)  
+- Consommation d'énergie fossile (EG.USE.COMM.FO.ZS)  
+- Superficie de cultures agricoles (AG.LND.AGRI.K2)  
+- Population rurale (SP.RUR.TOTL)  
+- Superficie totale (AG.SRF.TOTL.K2)  
+
+Les 5 indicateurs qui sont les plus influents pour un paramètre $\lambda=100$:  
+- Superficie de terrain (AG.LND.TOTL.K2)  
+- Population rurale (SP.RUR.TOTL)  
+- Consommation d'énergie fossile (EG.USE.COMM.FO.ZS)  
+- Superficie totale (AG.SRF.TOTL.K2)  
+- Population +65 ans (% of total) (SP.POP.65UP.TO.ZS)  
+
+Nous observons que les variables pour $\lambda=0$ et $\lambda=100$ sont senssiblement les mêmes.
+Mais il n'y a pas de corrélation évidente avec le CO2 émis.
+On note 3 indicateurs de superficie pour $\lambda=0$ ce qui laisse penser à une corrélation entre ces variables.
+
+### 3. Régression sur l'ensemble des valeurs de pénalisation
+
+Courbes des performances de la régression de Ridge.
+```{r}
+lambdaSeq = seq(0, 100, by = 0.01)
+resridgeSeq = lm.ridge(EN.ATM.CO2E.KT~., lambda = lambdaSeq, data = usaIndicatorScale)
+plot(resridgeSeq$GCV) # Performance de Lambda par cross-validation.
+plot(resridgeSeq) # Valeurs des coefficients selon lambda.
+```
+On prends le meilleur $\lambda=0.1$
+```{r}
+bestLambda = lambdaSeq[which.min(resridgeSeq$GCV)]
+print(bestLambda)
+bestResridge = lm.ridge(EN.ATM.CO2E.KT~., lambda = bestLambda, data = usaIndicatorScale)
+bestcoef = coef(bestResridge)
+print(bestcoef)
+```
+ 
+On pénalise les grandes valeurs de $\Vert\beta\Vert_2^2$ ce qui impliquent que les coefficients se rapprochent relativement de $0$ plus $\lambda$ croit.
+Notre cross-validation, donne un $\lambda_optimal=0.01$ qui minimise l'erreur du modèle.
+
+### 4. Erreur quadritique moyenne entre les données cibles.
+
+
+```{r}
+Ones= c(1)
+X = merge(Ones, usaIndicatorScale)
+X$Year <- NULL
+X$EN.ATM.CO2E.KT <- NULL
+
+Yridge =(Yridge=as.matrix(X)%*%as.vector(bestcoef))
+error = sum((usaIndicatorScale$EN.ATM.CO2E.KT - Yridge)^2)/length(Yridge)
+print(error)
+```
+L'erreur quadratique est de $3,6.10^{-11}$, soit une erreur très faible. La grandeur de la dimension econduit à l'overfitting.
+
+## Régression Lasso
+
+### 5. Import de la bibliothéque
+
+Dans une régression de type Lasso on cherche à trouver 
+$$ \widehat{\beta}_{RL} = \mathrm{argmin}_{\beta} (\Vert Y - X \beta \Vert_2^2 + \lambda \Vert\beta\Vert_1) $$
+avec $\lambda>0$, un paramètre fixé. On va chercher une valeur optimale de $\lambda$ par cross validation.
+
+Import de la bibliothéque lars:
+```{r}
+#install.packages("lars")
+library("lars")
+```
+
+### 6. Régression de Lasso
+```{r}
+X = usaIndicatorScale
+X$Year <-  NULL
+X$EN.ATM.CO2E.KT <- NULL
+X = as.matrix(X)
+reslasso = lars(X, usaIndicatorScale$EN.ATM.CO2E.KT, type='lasso')
+plot(reslasso) # Régression Lasso
+plot(reslasso$lambda)
+#print(reslasso$beta)
+```
+
+La régression Lasso montre selon les 27 valeurs de $\lambda$ les valeurs des coefficients.
+Les $\lambda$ croient de la droit vers la gauche de l'axe des abscisses.
+Un $\lambda=0$ est équivalent à une régression linéaire simple.
+
+### 7. Réduction du nombre de variables explicatives
+Les coefficients pour $\lambda=0$ sont:
+```{r}
+coef=predict.lars(reslasso,X,type="coefficients",mode="lambda",s=0)
+print(coef)
+```
+On note qu'une majorité de coefficients sont nuls. Il reste 13 variables explicatives.
+
+
+### 8. Variation de $\lambda$
+```{r}
+coef2 = predict.lars(reslasso,X,type="coefficients",mode="lambda",s=0.02)
+sort(abs(coef2$coefficients), decreasing = T)[1:6]
+
+coef4 = predict.lars(reslasso,X,type="coefficients",mode="lambda",s=0.04)
+sort(abs(coef4$coefficients), decreasing = T)[1:5]
+
+coef6 = predict.lars(reslasso,X,type="coefficients",mode="lambda",s=0.06)
+sort(abs(coef6$coefficients), decreasing = T)[1:4]
+```
+On observe pour $\lambda = 0.02$, $\lambda = 0.04$ et $\lambda = 0.06$ qu'il reste 5, 4 et 3 coefficients non nuls.
+Pour $\lambda = 0.06$ :  
+- Quantité d'énergie primaire utilisée (EG.USE.COMM.KT.OE)  
+- Proportion d'énergie importée (EG.IMP.CONS.ZS)  
+- Production d'énergie par charbon (EG.ELC.COAL.KH)  
+
+Ces variables sont liées à l'énergie. On peut en déduire une corrélation entre elles.
+Et dans l'absolu il apparait plus logique que dans le modèle de Ridge que les émissions de CO2 soient liées à la production et l'utilisation de l'énergie.
+
+### 9. Calculer l'erreur quadratique 
+
+```{r}
+pY = predict.lars(reslasso,X,type="fit",mode="lambda",s=0.06)
+error = sum((usaIndicatorScale$EN.ATM.CO2E.KT - pY$fit)^2)/length(pY$fit)
+print(error)
+```
+L'erreur quadratique est de $3.10^-4$. L'erreur du modèle de Lasso est donc plus important que la régression de Ridge.
+
+En conclusion, le modèle de régression de Lasso met en avant plus d'informations sur les variables les plus significatives avec une méthode de régularisation des coefficients plus brutale.
+le modèle de régression de Ridge fait apparaitre toutes les variables dans son modèle. 
+
+
+# Application II : agrégation de modèles
+
+
+## Analyse préliminaire
+```{r}
+tabSpam=read.table('spam.txt',header=T,sep=';')
+```
+
+On observe **4601** observations de 58 variables dont une variable cible.  
+- 55 nombres réels  
+- 2 entiers naturels  
+- le label email/spam  
+
+Les variables de type nombre réels sont les fréquences des mots et caractères observés dans les emails.
+Il y a 2788 emails et 1813 spams (39.4%).
+
+**N.B.: Le fichier indtrain.txt n'est pas fourni. Nous prenons donc des échantillons aléatoires.**
+```{r}
+desc = table(tabSpam$spam)
+proportionSpam = desc[2]/sum(desc)
+print(proportionSpam)
+
+#On prend aléatoirement sans remise les données d'apprentissage (75%) et les données de test (25%).
+dt = sort(sample(nrow(tabSpam), 0.75*nrow(tabSpam)))
+trainData75<-tabSpam[dt,]
+testData25<-tabSpam[-dt,]
+```
+
+
+
+## Arbres de classification
+
+### 1. Génération de l'arbre et visualisation
+Import de la bibliothéque lars:
+```{r}
+#install.packages("rpart")
+library("rpart")
+```
+
+Génération de l'arbre.
+```{r}
+spamTree = rpart('spam~.', data=trainData75)
+```
+
+On utilise un package pour afficher les arbres de classification.
+```{r}
+#install.packages("rpart.plot") 
+library("rpart.plot")
+prp(spamTree)
+```
+La variable la plus influente est **A.52** c'est la séparation qui a lieu à la racine de l'arbre.
+7 variables interviennent dans notre arbre: A.7, A.16, A.17, A.25, A.52, A.53, A.55.
+
+### 2. Calcul des erreurs, matrice de confusion
+
+Avec les données d'apprentissage nous obtenons :
+```{r}
+treePredTrain = predict(spamTree, trainData75, type="class")
+table(treePredTrain, trainData75[,ncol(trainData75)])
+```
+Nous observons 5% de faux positif et 18% de faux négatif.
+
+Avec les données de test nous obtenons :
+```{r}
+treePredTest = predict(spamTree, testData25, type="class")
+table(treePredTest, testData25[,ncol(testData25)])
+```
+Nous observons 4% de faux positif et 21% de faux négatif.
+
+
+### 3. Question manquante dans l'énoncé.
+
+Question absente dans l'énoncé.
+
+### 4 & 5 Bagging
+
+Bagging génére **25** arbres de classification à l'aide déchantillons bootstrap des données d'apprentissage.
+```{r}
+#install.packages("ipred")
+library("ipred")
+baggingPred = bagging(spam~., data=trainData75)
+```
+
+```{r}
+baggingPredTrain = predict(baggingPred, trainData75, type="class")
+table(baggingPredTrain, trainData75[,ncol(trainData75)])
+```
+Nous obtenons 0.1% de faux positif et 0.3% de faux négatif.
+
+```{r}
+baggingPredTest = predict(baggingPred, testData25, type="class")
+table(baggingPredTest, testData25[, ncol(trainData75)])
+```
+Nous obtenons 2.5% de faux positif et 11.5% de faux négatif.
+
+Les résultats obtenus sont de très bons. Le bagging permet d'atteindre une très bonne précision.
+
+### 6. & 7. & 8. Random Forest
+
+Sur **500** arbres nous obtenons avec la méthode Random Forest:
+```{r}
+#install.packages("randomForest")
+library("randomForest")
+randomForestPredic = randomForest(spam~., data=trainData75)
+```
+
+```{r}
+randomForestPredicTrain = predict(randomForestPredic, trainData75, type="class")
+table(randomForestPredicTrain, trainData75[,ncol(trainData75)])
+```
+Nous obtenons 0.05% de faux positif et 0.6% de faux négatif.
+
+```{r}
+randomForestPredicTest = predict(randomForestPredic, testData25, type="class")
+table(randomForestPredicTest, testData25[, ncol(trainData75)])
+```
+Nous obtenons 2% de faux positif et 9% de faux négatif.
+
+Il n'y a pas débat Random forest est clairement la méthode la plus efficace. 
+
+Observons l'importances des variables pour notre modèle Random Forest:
+```{r}
+varImpPlot(randomForestPredic, sort=T)
+```
+Les variables les plus fréquentes sont A.52 et A.53.
+
+### 9. & 10 & 11 & 12 Comparaisons des modèles étudiés : Scoring Classification
+
+Comparons les modèles:
+-CART,  
+-SVM,  
+-Regréssion Logistique,  
+-Analyse disciminante linéaire,  
+-Bagging,  
+-Random Forest.  
+
+avec une cross-validation de 10 itérations pour chaque méthode.
+
+```{r}
+library("kernlab")
+library("MASS")
+getError = function(modelname, data, type){
+  matrix = table(predict(modelname, data, type=type), data[,ncol(data)])
+  return ((matrix[1,2]+matrix[2,1])/sum(matrix))
+}
+
+K = 10
+
+abscisse = c("ADL", "RegLog", "CART", "SVM", "Bagging", "RandFor")
+
+crossValidationTrain = data.frame(matrix(0, nrow=K, length(abscisse)))
+crossValidationTest = data.frame(matrix(0, nrow=K, length(abscisse)))
+
+names(crossValidationTrain) = abscisse
+names(crossValidationTest) = abscisse
+
+for (i in 1:K) {
+
+#On prend aléatoirement sans remise les données d'apprentissage (75%) et les données de test (25%).
+dt = sort(sample(nrow(tabSpam), 0.75*nrow(tabSpam)))
+tabTrain<-tabSpam[dt,]
+tabTest<-tabSpam[-dt,]
+
+  # ADL
+  adlPred = lda(spam~., data=tabTrain)
+  confMatLDATrain = table(predict(adlPred, tabTrain)$class, tabTrain[, ncol(tabTrain)])
+  confMatLDATest = table(predict(adlPred, tabTest)$class, tabTest[, ncol(tabTest)])
+  
+  crossValidationTrain$ADL[i] = (confMatLDATrain[1,2]+confMatLDATrain[2,1])/(confMatLDATrain[1,1]+confMatLDATrain[1,2]+confMatLDATrain[2,1]+confMatLDATrain[2,2])
+  crossValidationTest$ADL[i] = (confMatLDATest[1,2]+confMatLDATest[2,1])/(confMatLDATest[1,1]+confMatLDATest[1,2]+confMatLDATest[2,1]+confMatLDATest[2,2])
+  
+  # Regression Logistic
+  tabTrainLR = tabTrain #parsing sinon erreur de glm
+  tabTestLR = tabTest
+  tabTrainLR[, ncol(tabTrainLR)] = as.numeric(tabTrain[, ncol(tabTrain)]) 
+  tabTestLR[, ncol(tabTestLR)] = as.numeric(tabTest[, ncol(tabTest)] )
+  lr = glm(spam~., data=tabTrainLR)
+  
+  rgPredTrain = ifelse(predict(lr, tabTrainLR)<1.5, 1, 2)
+  confMatLogRegTrain = table(rgPredTrain, tabTrainLR[, ncol(tabTrainLR)])
+  crossValidationTrain$RegLog[i] = (confMatLogRegTrain[1,2]+confMatLogRegTrain[2,1])/sum(confMatLogRegTrain)
+  rgPredTest = ifelse(predict(lr, tabTestLR)<1.5, 1, 2)
+  confMatLogRegTest = table(rgPredTest, tabTestLR[, ncol(tabTestLR)])
+  crossValidationTest$RegLog[i] = (confMatLogRegTest[1,2]+confMatLogRegTest[2,1])/sum(confMatLogRegTest)
+  
+  # CART
+  tree = rpart('spam~.', data=tabTrain)
+  crossValidationTrain$CART[i] = getError(tree, tabTrain, "class")
+  crossValidationTest$CART[i] = getError(tree, tabTest, "class")
+  
+  # SVM
+  svm = ksvm(spam~., data=tabTrain)
+  crossValidationTrain$SVM[i] = getError(svm, tabTrain, "response")
+  crossValidationTest$SVM[i] = getError(svm, tabTest, "response")
+  
+  # Bagging
+  baggingPred = bagging(spam~., data=tabTrain)
+  crossValidationTrain$Bagging[i] = getError(baggingPred, tabTrain, "class")
+  crossValidationTest$Bagging[i] = getError(baggingPred, tabTest, "class")
+  
+  # Random Forest
+  randomForestPred = randomForest(spam~., data=tabTrain)
+  crossValidationTrain$RandFor[i] = getError(randomForestPred, tabTrain, "class")
+  crossValidationTest$RandFor[i] = getError(randomForestPred, tabTest, "class")
+
+}
+```
+
+Voici le résultat avec les boites à moustaches des erreurs de chaque méthode pour les données d'apprentissage et de test:
+
+```{r}
+boxplot(crossValidationTrain)
+boxplot(crossValidationTest)
+```
+
+En conclusion, les méthodes de Bagging et de Random Forest sont les méthodes les plus performantes.
+On notera que ces deux méthodes sont presques parfaite sur les données d'apprentissage et qu'elle se trompent faiblement sur les données de test.
+Ajoutons que la méthode de régression logistique a des performances relativement comparable que l'analyse discriminante linéaire sur les données d'apprentissage sans augmentation d'erreur sur les données de test.
+On peut ajouter que les données mail/spam sont adaptés aux modèles de frontières de décision, ainsi Bagging et Random Forest offrent de meilleurs résultats qu'un arbre de décision classique.
+Random Forest est la meilleure méthode de prédiction pour ce type de données.
+
+

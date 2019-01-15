@@ -1,0 +1,567 @@
+---
+title: 'TP n°2 - Classification: régression logistique et SVM'
+author: "Salim Nadir et Guillaume Ostrom"
+output: pdf_document
+---
+*** 
+# Application I : Régression logistique
+
+Nous constatons que le fichier *SaHeart.info* décrit les différentes variables présentes dans le fichier *SaHeart.txt*, où la dernière colonne (chd) est la variable cible.
+
+### 1. Les données
+
+Procédons au chargement du fichier *SaHeart.txt* :
+```{r}
+setwd(getwd())
+heartData = read.table('SaHeart.txt',header=TRUE,sep=",")
+summary(heartData)
+attributes(heartData)$names
+```
+
+Voici les correspondances de chaque variable:  
+- sbp : la pression systolique,  
+- tobacco : la quantité en kilogrammes de tabac ingérée,  
+- ldl : lipoprotéine de basse densité,  
+- famhist : antécédent d'attaque cardiaque,  
+- typea :	type-A,  
+- obesity : indice de masse corporelle,  
+- alcohol : consommation d'alcool par semaine en litre,  
+- age : âge de l'individu,  
+- chd : attaque cardiaque observée chez l'individu.  
+
+
+### 2. Scatterplot
+
+Affichons le scatterplot du jeu de données:
+```{r}
+pairs(heartData, pch=25, bg=c("firebrick","deepskyblue3"))[unclass(factor(heartData[, "chd"]))]
+```
+
+### 3. Régression logistique
+```{r}
+regLogistic = glm("chd~.", family=gaussian, heartData)
+summary(regLogistic)
+```
+
+On constate que les $p-values$ des variables tabacco, famhist et age sont faibles donc fortement significatives.  
+Nous observons que les variables tabacco, famhist et age sont les variables les plus explicatives.
+
+### 4. Comparaisons
+
+On calcule la matrice de confusion.
+```{r}
+predictHeartAttack = predict(regLogistic, heartData)
+
+getConfusionMatrix = function(predictHeartAttack, heartData) {
+  
+  heartDataSize = length(predictHeartAttack)
+  predictHeartAttackBoolean = c()
+  
+  confMatrix = matrix( c(0,0,0,0), nrow=2, ncol=2, byrow = TRUE)
+  dimnames(confMatrix) = list( c("pred=0", "pred=1"),c("chd=0", "chd=1"))
+  
+  for (i in 1:heartDataSize){
+    if(predictHeartAttack[i]>0.5){
+      predictHeartAttackBoolean[i] = 1
+      if(heartData$chd[i]==1){
+        confMatrix[2,2] = confMatrix[2,2] + 1
+      }else{
+         confMatrix[2,1] = confMatrix[2,1] + 1
+      }
+    }else{
+      predictHeartAttackBoolean[i] = 0
+      if(heartData$chd[i]==1){
+        confMatrix[1,2] = confMatrix[1,2] + 1
+      }else{
+         confMatrix[1,1] = confMatrix[1,1] + 1
+      }
+    }
+  }
+
+probaFaslePositive = confMatrix[2,1]/(confMatrix[1,1] + confMatrix[2,1])
+probaFasleNegative = confMatrix[1,2]/(confMatrix[1,2] + confMatrix[2,2])
+  
+  return (list ("Matrice de confusion"=confMatrix, "Probabilité de risque de faux positif "=probaFaslePositive,"Probabilité de risque de faux négatif "=probaFasleNegative) )
+}
+
+confusionMatrix = getConfusionMatrix(predictHeartAttack, heartData)
+print(confusionMatrix)
+#NB: Methode de calcul plus directe de la matrice de confusion:
+matrixConf2 = table(regLogistic$fitted.values>0.5,heartData[,"chd"])
+print(matrixConf2)
+```
+
+On constate 13 % de risque de faux positif et 49 % de risque de faux négatif.
+
+### 5. Validation croisée
+
+
+Nous définisons 75% de nos données comme étant des données d'apprentissage, les 25% restant seront destinées à tester notre modèle.
+
+```{r}
+#On prend aléatoirement sans remise les données d'apprentissage (75%) et les données de test (25%).
+dt = sort(sample(nrow(heartData), 0.75*nrow(heartData)))
+trainData75<-heartData[dt,]
+testData25<-heartData[-dt,]
+
+#Regression logistic sur les données d'apprentissage
+regLogistic75 = glm("chd~.", family=gaussian, trainData75)
+summary(regLogistic75)
+#Prediction avec les données de test
+predictHeartAttack75_25 = predict(regLogistic75, testData25)
+#Matrice de confusion du modèle
+confusionMatrix75_25 = getConfusionMatrix(predictHeartAttack75_25, testData25)
+print(confusionMatrix75_25)
+
+```
+
+Pour ce modèle de *cross validation* nous obtenons un risque de faux positif de 13.2% et un risque de faux négatif de 50.0%.
+Notons que ces résultats sont proches d'une regression logistique sur l'ensemble des données, on peut en déduire la bonne significativité du modèle.
+
+Répétons plusieurs fois cette procédure.
+```{r}
+checkCrossValidation = function(heartData, iterations) {
+ 
+ confMatrix75_25 = c()
+ error = c()
+    for (i in 1:iterations) {
+
+      dt = sort(sample(nrow(heartData), 0.75*nrow(heartData)))
+      data75<-heartData[dt,]
+      data25<-heartData[-dt,]
+
+      #Regression logistic sur les donn?es d'apprentissage
+      regLog75 = glm("chd~.", family=gaussian, data75)
+      #Prediction avec les donn?es de test
+      predict75_25 = predict(regLog75, data25)
+      #Matrice de confusion du mod?le
+      confMat = getConfusionMatrix(predict75_25, data25)
+      confMatrix75_25[i] = confMat[1]
+      error[i] = (as.numeric(confMat[[1]][1,2])+as.numeric(confMat[[1]][2,1]) )/  (as.numeric(confMat[[1]][1,2])+as.numeric(confMat[[1]][2,1]) + as.numeric(confMat[[1]][2,2])+as.numeric(confMat[[1]][1,1]))
+      
+    }
+ 
+ return (list("Erreur minimum"=error[which.min(error)], "Erreur maximum"=error[which.max(error)],"Erreur moyenne"=mean(error)))
+}
+print(checkCrossValidation(heartData, 250))
+
+```
+
+On remarque que l'erreur minimum est à 17% et que l'erreur maximum est élevée à 38% avec une moyenne d'erreur à 27%, ce qui est acceptable.  
+Tester son modéle sur les données d'entrainement conduirait à sous-estimer l'erreur, et donc a un biais. L'intérêt de cette approche est de tester la significativité d'un modèle entrainé sur 75% des données et de le tester sur les 25% données restantes.  
+On peut en déduire que notre modèle est plutôt pertinant.  
+
+### 6. Sélection des variables
+
+```{r}
+# Backward
+regBackward = step(regLogistic75, direction='backward', k=log(nrow(heartData)))
+formula(regBackward)
+#NB Forward
+regForward = step(regLogistic75, direction='forward', k=log(nrow(heartData)))
+formula(regForward)
+# Both
+regBoth = step(regLogistic75, direction='both', k=log(nrow(heartData)))
+formula(regBoth)
+```
+Une régression en direction *backward* nous sélectionne les 4 variables suivantes:  
+- famhist  
+- age  
+- tabacco  
+- ldl  
+
+```{r}
+heartDataBackward = heartData[c(3, 4, 6, 10, 11)]
+print(attributes(heartDataBackward)$names)
+
+dtBackward = sort(sample(nrow(heartDataBackward), 0.75*nrow(heartDataBackward)))
+dataBackward75<-heartDataBackward[dtBackward,]
+dataBackward25<-heartDataBackward[-dtBackward,]
+
+#Regression logistic sur les donn?es d'apprentissage
+regLog75_Backward = glm("chd~.", family=gaussian, dataBackward75)
+#Prediction avec les donn?es de test
+predict75_25_Backward = predict(regLog75_Backward, dataBackward25)
+#Matrice de confusion du mod?le
+confMatBackward = getConfusionMatrix(predict75_25_Backward, dataBackward25)
+print(confMatBackward)
+      
+      
+print(checkCrossValidation(heartDataBackward, 150))
+      
+```
+
+Nous observons qu'avec un step **backward** l'erreur minimum est à 18% et l'erreur maximum à 38% et la même erreur moyenne est à 27%.  
+Nous remarquons qu'il n'y a pas d'amélioration de l'erreur par rapport au modèle complet, ce qui donne un **avantage à ce modèle** car il nécessite moins de données pour le même résultat.
+
+### 7. Courbe ROC
+
+Comparons à l'aide des courbes ROC ces 3 modèles de régression logistique:  
+1)Modèle complet  
+2)Modèle avec les variables sélectionnées  
+3)Modèle avec la variable la plus significative  
+
+Import de la bibliothéque ROC
+```{r}
+#install.packages("ROCR")
+library(ROCR)
+library(gplots)
+
+plotRoc = function(predictTrain, dataTrainTest, color, added){
+rocPred = prediction(predictTrain, dataTrainTest["chd"])
+rocPerf = performance(rocPred, measure = "tpr", x.measure = "fpr")
+plot(rocPerf, add= added, col=color)
+}
+#Mod?le Complet Train
+predictHeartAttack75_75 = predict(regLogistic75, trainData75)
+plotRoc(predictHeartAttack75_75,trainData75,"cyan2", FALSE)
+
+#Mod?le Complet Test
+plotRoc(predictHeartAttack75_25,testData25,"cyan4", TRUE)
+
+#Mod?le Backward Train
+predict75_75_Backward = predict(regLog75_Backward, dataBackward75)
+plotRoc(predict75_75_Backward,dataBackward75, "darkgoldenrod1",FALSE)
+
+#Mod?le Backward Test
+plotRoc(predict75_25_Backward,dataBackward25,"darkgoldenrod4",TRUE)
+
+#Mod?le mono variable 
+dtmono = sort(sample(nrow(heartData), 0.75*nrow(heartData)))
+dataMono75<-heartData[dtmono,]
+dataMono25<-heartData[-dtmono,]
+
+#Mod?le mono Train
+regLogisticMono = glm("chd~ldl", family=gaussian, heartData)
+predict75_75_mono = predict(regLogisticMono, dataMono75)
+plotRoc(predict75_75_mono,dataMono75, "red",FALSE)
+
+#Mod?le mono variable
+predict75_25_mono = predict(regLogisticMono, dataMono25)
+plotRoc(predict75_25_mono,dataMono25, "blue",TRUE)
+
+```
+
+
+En conclusion, le modèle complet n°1 donne certes des résultats comparable à celui du n°2, mais comporte plus de variables et donc de données pour y arriver. Aussi, le modèle n°3 qui se résume à une variable explicative n'est pas suffisament pertinant.  
+Donc les courbes ROC montrent que le **modèle n°2** issu d'une sélection des 4 meilleurs variables et le modèle le plus adapté.  
+
+
+# Application II : Classification par SVM
+
+## Analyse préliminaire
+
+### 1. Etude rapide
+
+Toutes les informations liées aux données spam sont dans le fichier **spaminfo.txt**
+
+### 2. Chargement des données
+Nous procédons au chargement des données spam.
+```{r}
+spamData = read.table("spam.txt", header=TRUE, sep=';')
+```
+
+### 3. Observations
+
+```{r}
+summary(spamData)
+```
+Dans le fichier **spam.txt** nous observons 4601 observations, 58 variables dont 55 float, 2 int, 1 label et 1 boolean.
+
+
+### 4. Head
+```{r}
+head(spamData)
+```
+Nous observons que la variable cible est située à la derniére colonne, la numéro 58.
+
+
+### 5. Proportions
+
+
+```{r}
+Y = spamData[,ncol(spamData)]
+levels(Y)
+nlevels(Y) 
+table(Y)
+plot(Y)
+spamProp = table(Y)[2]/(table(Y)[1]+table(Y)[2])
+print(spamProp)
+mailProp = 1 - spamProp
+print(mailProp)
+```
+La proportions de spam est de **39.4%** et la proportion de mail est de **60.6%**.
+
+N.B. : La commande summary nous donne un résultat plus immédiat:
+```{r}
+summary(spamData$spam)
+```
+
+## Classification par SVM
+
+
+### 6. Données d'apprentissage et de test
+
+Nous choisissons aléatoirement 75% de nos données comme étant des données d'apprentissage, les 25% restant seront destinées à tester notre modèle.
+
+```{r}
+#On prend al?atoirement sans remise les donn?es d'apprentissage (75%) et les donn?es de test (25%).
+dtSpam = sort(sample(nrow(spamData), 0.75*nrow(spamData)))
+trainSpamData75<-spamData[dtSpam,]
+testSpamData25<-spamData[-dtSpam,]
+
+```
+
+Chargement des données.
+```{r}
+Xtrain = as.matrix(trainSpamData75[,-58])
+Ytrain = as.matrix(trainSpamData75[,58])
+```
+
+Calculons les matrices de covariables
+```{r}
+library(corrplot)
+corrplot(cor(trainSpamData75[,-58]),method="number")
+```
+
+
+### 7. Calibration C-SVM
+
+Calibrons les données avec un noyau gaussien sur les données d'apprentissage :
+
+```{r}
+#install.packages("kernlab")
+library(kernlab)
+# rbfdot Radial Basis kernel "Gaussian", polydot Polynomial kernel, vanilladot Linear kernel,tanhdot Hyperbolic tangent kernel, laplacedot Laplacian kernel, besseldot Bessel kernel, anovadot ANOVA RBF kernel, splinedot Spline kernel, stringdot String kernel
+
+ksvmTrainSpam = ksvm(Xtrain, Ytrain, kernel="rbfdot", type="C-svc")
+predictTrainSpam = predict(ksvmTrainSpam, Xtrain)
+
+```
+
+### 8. Caractéristiques de la base d'apprentissage
+
+```{r}
+matrixConfSpam = table(predictTrainSpam, Ytrain)
+print(matrixConfSpam)
+FalsePositive = matrixConfSpam[1,2] / (matrixConfSpam[1,1]+matrixConfSpam[1,2])
+print(FalsePositive)
+FalseNegative = matrixConfSpam[2,1] / (matrixConfSpam[2,1]+matrixConfSpam[2,2])
+print(FalseNegative)
+```
+
+On note que les résultats son trés significatif avec moins de 5% d'erreur de faux positif et prés de 4% d'erreur de faux négatif.
+
+### 9. Caractéristiques de la base de test
+
+```{r}
+Xtest = as.matrix(testSpamData25[,-58])
+Ytest = as.matrix(testSpamData25[,58])
+predictTestSpam = predict(ksvmTrainSpam, Xtest)
+matrixConfSpamTest = table(predictTestSpam, Ytest)
+print(matrixConfSpamTest)
+FalsePositive = matrixConfSpamTest[1,2] / (matrixConfSpamTest[1,1]+matrixConfSpamTest[1,2])
+print(FalsePositive)
+FalseNegative = matrixConfSpamTest[2,1] / (matrixConfSpamTest[2,1]+matrixConfSpamTest[2,2])
+print(FalseNegative)
+```
+
+On note que les résultats son trés significatif avec 56 d'erreur de faux positif et près de 5% d'erreur de faux négatif.
+
+
+### 10. Mesure de l'impact du choix aléatoire de la base d'apprentissage
+
+
+Mesurons pour 20 itérations l'erreur du modèle.
+```{r}
+
+getError = function(Noyau){
+  # 1) Choix de la base
+  dtSpam = sort(sample(nrow(spamData), 0.75*nrow(spamData)))
+  trainSpamData75<-spamData[dtSpam,]
+  testSpamData25<-spamData[-dtSpam,]
+  
+  # Initialisation des matrices
+  Xtrain = as.matrix(trainSpamData75[,-58])
+  Ytrain = as.matrix(trainSpamData75[,58])
+  Xtest = as.matrix(testSpamData25[,-58])
+  Ytest = as.matrix(testSpamData25[,58])
+
+  # 2) Calibration du mod?le sur la base d'apprentissage
+  ksvmTrainSpam = ksvm(Xtrain, Ytrain, kernel=Noyau, type="C-svc")
+
+  # 3) Evaluation de l'erreur sur la base de test
+  predictTestSpam = predict(ksvmTrainSpam, Xtest)
+  matrixConfSpamTest = table(predictTestSpam, Ytest)
+  
+  # Retourne l'erreur
+  return (as.numeric((matrixConfSpamTest[1,2]+matrixConfSpamTest[2,1]) / (matrixConfSpamTest[1,1]+matrixConfSpamTest[1,2]+matrixConfSpamTest[2,1]+matrixConfSpamTest[2,2])))
+  }
+
+error = c()
+Noyau = "rbfdot"
+for(k in 1:20){
+
+  error[k] = getError(Noyau)
+  
+}
+#Erreur minimum :
+print(error[which.min(error)])
+# Erreur maximum :
+print(error[which.max(error)])
+# Erreur moyenne :
+print(mean(error))
+```
+
+Sur 20 itérations, l'erreur minimum est de 5%, l'erreur maximum est de 8% et l'erreur moyenne de 7%.  
+
+Affichons l'histogramme et la boite à moustache des erreurs pour le noyau gaussien.
+```{r}
+hist(error, col="firebrick1")
+boxplot(error)
+```
+
+En conclusion, un noyau gaussien est mieux adapté.
+
+### 11. Comparaison des performances des 3 noyaux
+
+Comparons les performances des 3 noyaux gaussien, polynomial et linéaire sur 40 itérations
+```{r}
+errorLinear= c()
+errorPoly = c()
+errorGauss = c()
+
+for(k in 1:40){
+  errorLinear[k] = getError("vanilladot")
+  errorPoly[k] = getError("polydot")
+  errorGauss[k] = getError("rbfdot")
+}
+
+## Noyau Lin?aire :
+# Erreur minimum :
+print(errorLinear[which.min(errorLinear)])
+# Erreur maximum :
+print(errorLinear[which.max(errorLinear)])
+# Erreur moyenne :
+print(mean(errorLinear))
+#Histogramme de l'erreur
+hist(errorLinear, col="firebrick1")
+
+## Noyau Polynomiale :
+#Erreur minimum :
+print(errorPoly[which.min(errorPoly)])
+# Erreur maximum :
+print(errorPoly[which.max(errorPoly)])
+# Erreur moyenne :
+print(mean(errorPoly))
+#Histogramme de l'erreur
+hist(errorPoly, col="firebrick1")
+
+## Noyau Gaussien :
+#Erreur minimum :
+print(errorGauss[which.min(errorGauss)])
+# Erreur maximum :
+print(errorGauss[which.max(errorGauss)])
+# Erreur moyenne :
+print(mean(errorGauss))
+#Histogramme de l'erreur
+hist(errorGauss, col="firebrick1")
+
+```
+
+Comparons empiriquement les erreurs des 3 noyaux:
+```{r}
+boxplot(errorLinear, errorPoly, errorGauss)
+```
+
+En conclusion le noyau présentant l'erreur la plus basse est le noyau gaussien.
+
+# Application III : Modèle de régression par SVM
+
+
+### 1. Noyau et performance de UsCrime
+
+Procédons au chargement du fichier *UsCrime.txt* :
+```{r}
+usCrimeData = read.table('UsCrime.txt',header=TRUE, sep=' ')
+#names(usCrimeData) <- NULL # suppression des headers
+```
+
+Comparons différents modèles de régression permettant de prédire le taux de crimminalité à l'aide d'un modèle SVM.
+
+```{r}
+# library(kernlab)
+# help(ksvm)
+# getErrorUsCrime = function(NoyauUs = "rbfdot"){
+#   # 1) Choix de la base
+#   dtusCrime = sort(sample(nrow(usCrimeData), 0.75*nrow(usCrimeData)))
+#   trainusCrimeData75<-usCrimeData[dtusCrime,]
+#   testusCrimeData25<-usCrimeData[-dtusCrime,]
+#   
+#   # Initialisation des matrices
+#   XtrainUsCrime = as.matrix(trainusCrimeData75[,-1])
+#   YtrainUsCrime = as.matrix(trainusCrimeData75[,1])
+#   XtestUsCrime = as.matrix(testusCrimeData25[,-1])
+#   YtestUsCrime = as.matrix(testusCrimeData25[,1])
+# 
+#   # 2) Calibration du mod?le sur la base d'apprentissage
+#   ksvmTrainUsCrime = ksvm(XtrainUsCrime, YtrainUsCrime, kernel=NoyauUs, type="C-svc") 
+#   #BUG "dependent variable has to be of factor or integer type for classification mode."
+# 
+#   # 3) Evaluation de l'erreur sur la base de test
+#   predictTestUsCrime = predict(ksvmTrainUsCrime, XtrainUsCrime)
+#   matrixConfUsCrimeTest = table(predictTestUsCrime, YtestUsCrime)
+#   
+#   # Retourne l'erreur
+#   return (as.numeric((matrixConfUsCrimeTest[1,2]+matrixConfUsCrimeTest[2,1]) / (matrixConfUsCrimeTest[1,1]+matrixConfUsCrimeTest[1,2]+matrixConfUsCrimeTest[2,1]+matrixConfUsCrimeTest[2,2])))
+# }
+# 
+# 
+# errorusCrimeLinear= c()
+# errorusCrimePoly = c()
+# errorusCrimeGauss = c()
+# 
+# for(k in 1:1){
+#   errorusCrimeLinear[k] = getErrorUsCrime("vanilladot")
+#   errorusCrimePoly[k] = getErrorUsCrime("polydot")
+#   errorusCrimeGauss[k] = getErrorUsCrime("rbfdot")
+# }
+# 
+# ## Noyau Lin?aire :
+# # Erreur minimum :
+# print(errorusCrimeLinear[which.min(errorusCrimeLinear)])
+# # Erreur maximum :
+# print(errorusCrimeLinear[which.max(errorusCrimeLinear)])
+# # Erreur moyenne :
+# print(mean(errorusCrimeLinear))
+# #Histogramme de l'erreur
+# hist(errorusCrimeLinear, col="firebrick1")
+# 
+# ## Noyau Polynomiale :
+# #Erreur minimum :
+# print(errorusCrimePoly[which.min(errorusCrimePoly)])
+# # Erreur maximum :
+# print(errorusCrimePoly[which.max(errorusCrimePoly)])
+# # Erreur moyenne :
+# print(mean(errorusCrimePoly))
+# #Histogramme de l'erreur
+# hist(errorusCrimePoly, col="firebrick1")
+# 
+# ## Noyau Gaussien :
+# #Erreur minimum :
+# print(errorusCrimeGauss[which.min(errorusCrimeGauss)])
+# # Erreur maximum :
+# print(errorusCrimeGauss[which.max(errorusCrimeGauss)])
+# # Erreur moyenne :
+# print(mean(errorusCrimeGauss))
+# #Histogramme de l'erreur
+# hist(errorusCrimeGauss, col="firebrick1")
+
+```
+
+Comparons empiriquement les erreurs des 3 noyaux:
+```{r}
+# boxplot(errorusCrimeLinear, errorusCrimePoly, errorusCrimeGauss)
+```
+
+En conclusion le noyau gaussien présente l'erreur la plus faible. C'est donc le modèle le plus significatif.

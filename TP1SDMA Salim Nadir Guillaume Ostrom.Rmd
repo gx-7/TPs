@@ -1,0 +1,433 @@
+---
+title: "TP n?1 - Mod?les lin?aires et mod?les de m?langes"
+author: "Salim Nadir et Guillaume Ostrom"
+output: pdf_document
+---
+*** 
+# Application I : mod?le de r?gression lin?raire
+
+##   Analyse des donn?es du probleme
+
+
+Nous constatons que le fichier *USCrimeinfo.txt* d?crit les diff?rentes variables pr?sentes dans le fichier *UsCrime.txt*, o? la premi?re colonne (R) est la variable cible.
+
+Proc?dons au chargement du fichier *UsCrime.txt* :
+```{r}
+tab = read.table('UsCrime.txt',header=TRUE)
+```
+Puis visualisons les nuages de points entre les variables :
+```{r fig.cap='scatterplot matrix'}
+pairs(tab)
+```
+Parmis les 182 observations disponibles, nous constatons une forte corr?lation positive entre les variables **Ex0** et **Ex1** ainsi qu'entre les variables **U1** et **U2**. Cependant les variables **W** et **X** ont aussi une forte corr?lation mais celle-ci est n?gative. D'autres sont moins marqu?es tel que **W** et **Ex1** par exemple.
+
+Int?ressons nous maintenant aux corr?lations entre les diff?rentes variables et v?rifions les intuitions pr?c?dentes.
+````{r}
+library(corrplot)
+corrplot(cor(tab),order="hclust", method="number")
+```
+
+Les co?fficients de corr?lation confirment bien ce que nous avons observ? avec les nuages de points.
+Nous pouvons relever d'autres correlation int?ressantes, tel que **X** et **Ed** qui ont une corr?lation n?gative.
+
+
+
+##  Mod?le lin?aire
+
+Nous souhaitons ?tudier un mod?le lin?aire. Formellement, celui-ci nous permettra d'expliciter la variable cible en fonction des autres variables disponibles.
+
+### 1. Ex?cution du mod?le :
+
+````{r}
+res=lm('R~.',data=tab)
+print(res)
+```
+
+````{r}
+summary(res)
+```
+
+````{r}
+attributes(res)
+```
+
+Nous obtenons un mod?le ? 33 degr?s de libert?.
+Nous constatons que la $p-value$ de la statistique de Fisher est tr?s faible par rapport ? $alpha$ ce qui rejette l'hypothese **H0 des co?fficients directeurs nuls** et qui confirme bien l'existance de **H1 coefficients non nuls** pour la r?gression lin?aire ?tudi?e.
+
+Ajoutons que l'offset **(Intercept)** a une $p-value$ tr?s faible $~(10^{-5})$ ce qui implique le rejet de **H0** ce qui confirme son co?fficient directeur tr?s fort. Aussi, nous remarquons que les variable **Ed** poss?de l'un des co?fficient directeur les plus ?lev? et a une $p-value$ faible. Ce qui permet de rejetter l'hypoth?se **H0** sur Ed. Enfin  **X** a une $p-value$ faible. Ce qui implique le rejet de l'hypoth?se **H0**
+
+### 2. Le mod?le global :
+
+$R^{2}$ est le coefficient de d?termination mesurant la qualit? de la pr?diction d'une r?gression lin?aire.
+Plus $R^{2}$ est proche de 1 plus les donn?es sont proches de la droite de r?gression. 
+Soit $y_i$ les valeurs des donn?es, $\hat{y_i}$ les valeurs pr?dites et $\bar{y}$ la moyenne des mesures, alors:
+$$ R^{2} = 1-\frac{\sum_{i=1}^{n} (\hat{y_i} - \bar{y})^2}{\sum_{i=1}^{n} (y_i - \bar{y})^2} $$
+$R^{2}$ exprime la colin?arit? de $y_i$ et $\hat{y_i}$. Il s'agit en fait du $cos^{2}(y_i,\hat{y_i})$. Dans notre mod?le $R^{2} = 0.7692$
+Notons que $R^{2}$ est ?lev? mais celui-ci n'est pas suffisement pertinant car le nombre de dimensions (**14**) est comparable au nombre d'entr?es (**48**). Ainsi $R^{2} ajust?$ est plus adatp? ? notre mod?le.
+
+D?terminer si le mod?le est significatif revient ? ?valuer si la F-statistique du test de Fisher est pertinante :
+Soit $\beta_i$ les coefficients de notre mod?le.
+$$ H_0 : \beta_1 = ... = \beta_n = 0 $$
+$$ H_1 : \exists \textrm{ i tel que } \beta_i \ne 0 $$
+
+La F-statistique obtenue est $8.462$ associ?e ? la $p-value = 3.686(10^{-7})$.
+La $p-value$ ?tant faible devant $0.05$ on peut donc dire que le mod?le est significatif.
+
+### 3. Les coefficients du mod?le
+
+Dans notre ?tude, le test statistique utilis? est un test de Student $t-value$. La t-statistique est le rapport entre la valeur du coefficient $Estimate$ et son ?cart type $Std.Error$. Enfin la probabilit? d'atteindre une t-value sup?rieure est d?crite par la $p-value$. Plus la $p-value$ est faible plus l'on peut rejetter $H_{0}$ et ainsi consid?rer le coefficient comme significatif.
+Nous en d?duisons que les ast?risques indiquent le niveau de confiance avec lequel nous pouvons rejetter $H_{0}$, ? 99.9% pour $***$, ? 99% pour $**$ et 95% pour $*$.
+
+L'?tude des $p-values$ de chacune des variables nous permet de mettre en ?vidence la significativit? de chacune de ces variables dans notre mod?le global.
+
+On peut en conclure que 4 variables sont significatives dans notre mod?le: **Ed**, **X**, **Age** et **U2**.
+
+Voici les intervalles de confiance pour chacun des coefficients au risque 5% :
+````{r}
+confint(res,level = 0.95)
+```
+
+on observe que les intervalles de confiances de nos variables sont les plus resserr?s.
+
+N.B.: au risque 1% :
+````{r}
+confint(res,level = 0.99)
+```
+### 4. Etude des valeurs predites
+
+Affichage des pr?dictions de la variable cible en fonction des valeurs observ?es : 
+````{r}
+plot(res$fitted.values,tab$R)
+lines(0:250, 0:250)
+```
+
+Nous constatons que le r?sultat est relativement satisfaisant.
+Les donn?es ne sont pas trop ?loign?es de la pr?diction.
+
+Voici les intervalles de confiance pour les valeurs pr?dites au risque 5% :
+````{r}
+predict(res,tab, interval = 'predict')
+
+```
+
+On constate que la pr?diction est l?g?rement corr?l?e ? la variable **R** ? pr?dire. Cependant les biais mettent en ?vidence un ?talement.
+
+````{r}
+predict(res,tab, interval = 'confidence', level = 0.95)
+```
+
+### 5. Etude des r?sidus
+
+
+Voici l'erreur quadratique des r?sidus :
+````{r}
+mean((res$residuals-mean(res$residuals))^2) 
+```
+
+Voici l'?stimation r?siduelle de la variance quadratique :
+````{r}
+var(res$residuals)
+````
+````{r}
+plot(tab$R,res$residuals)
+```
+Nous observons que les valeurs des r?sidus sont proches de la valeur 0.
+On peut donc en conclure que le mod?le est relativement satisfaisant, cependant il est possible de l'affiner.
+
+```{r}
+qqnorm(res$residuals)
+
+qqline(res$residuals)
+```
+Nous observons que les r?sidus semblent suivrent une loi normale.
+Nous utilisons le test de Shapiro sur les r?sidus afin de confirmer cette observation.
+
+```{r}
+shapiro.test(res$residuals)
+```
+Nous constatons que la $p-value$ est tr?s grande donc on ne rejette pas l'hypoth?se de normalit?.
+
+
+### 6. Performances du mod?le sur de nouvelles donnees
+
+
+N.B.: Correction dans l'?nonc? : indTest croit de 3 en 3 depuis 1 : 1,4,7...
+
+Nous souhaitons entrainer notre mod?le sur deux tiers des donn?es et tester notre mod?le sur le tiers des donn?es restante.
+
+Nous g?n?rons les indices de test :
+```{r}
+indTest<-seq(1,nrow(tab),by = 3)
+indTrain<-setdiff(1:nrow(tab),indTest)
+```
+```{r}
+tabTest<-tab[indTest,]
+tabTrain<-tab[indTrain,]
+```
+Import des donn?es:
+```{r}
+res<-lm('R~.',data=tabTrain)
+```
+```{r}
+summary(res)
+```
+Nous remarquons que **X** devient plus significative avec une $p-value$ faible $0.00934$ et **U2** a encore significativit? int?ressante.
+
+N.B. : l'int?r?t de la variable **Intercept** se r?sume ? de l'overfiting des donn?es, ce qui n'est pas exploitable en terme de pr?diction.
+
+Nous utilisons notre mod?le sur les donn?es de test :
+```{r}
+prediction = predict(res,tabTest)
+
+mean((prediction-mean(tabTest$R))^2)
+
+sqrt(var((prediction-mean(tabTest$R))^2))
+
+plot(tabTest$R,(prediction-mean(tabTest$R))^2)
+```
+La moyenne des erreurs est ? $1276.863$ et l'?cart-type et ? $1750.151$.
+En conclusion, les moyennes des erreurs sont ?lev?es pour ce mod?le.
+Il n'est pas suffisament pertinant.
+
+
+### 7. Analyse graphique ###
+Par analyse graphique :
+```{r}
+x11()
+par(mfrow=c(2,2))
+plot(res)
+```
+On observe que l'allure des r?sidus suit tr?s relativement une loi normale.
+Notamment nous constatons dans *Residuals vs Fitted* et *Scale-Location* que la loi n'est pas exactement centr?e en z?ro.
+Ensuite dans *Residuals vs Leverage* nous constatons que les valeurs des r?sidus ne sont pas trop grandes.
+Enfin dans *Normal Q-Q*, nous constatons que la loi n'est pas normale aux extr?mit?s. 
+
+
+# Application II : m?lange de classifieurs, algorithme EM
+
+
+## M?lange de gaussiennes
+
+
+Chargement du fichier *irm_thorax.txt* : 
+```{r}
+irm=as.matrix(read.table("irm_thorax.txt",header=F,sep=';'))
+```
+
+G?n?ration de l'image :
+```{r echo=TRUE}
+image(irm)
+```
+Nous observons une fronti?re relativement oblique entre deux zones color?es: rouge en bas-droite et jaune en haut-gauche.
+Nous devinons la colonne vert?brale d'un homo-sapiens.
+
+Affichage de l'histogramme :
+```{r echo=TRUE}
+hist(irm)
+```
+
+Nous observons que les donn?es sont distribu?es selon 2 lois gaussiennes de moyennes qui semblent ?tre 135 et 240.
+
+### 3 & 4. Impl?mentation de l'algorithme Expectation-Maximization
+
+Nous avons impl?ment? un algorhithme EM qui prend en param?tre les donn?es et le nombre de m?lange de K loi gaussienne.
+
+
+#### 1) Initialisation des vecteurs et matrices
+
+#### 2) It?ration jusqu'? convergence
+
+#### 3) E-Step
+Etape **E**: calcul de $t_ik$ par la r?gle d'inversion de Bayes:
+$$ t_{ik}=\frac{\pi_k^{(c)}f(x_i,\theta_k^{(c)})}{\sum_{\ell=1}^g\pi_\ell^{(c)} f(x_i,\theta_\ell^{(c)})} $$
+Dans le cas du m?lange gaussien avec K=2 et d=1 nous calculons les responsabilit?s tel que:
+$$ \widehat{\eta}^{(t+1)}=\frac{ p_1^{(t)}f_{\mu_1^{(t)},\Sigma_1^{(t)}}(x_i)}{f_{X|p^{(t)},\theta^{(t)}(x_i)}} $$
+avec,
+$$ p_1^{(t+1)}=\frac{1}{n}\Sigma_{i=1}^{n}\widehat{\eta}^{(t+1)} $$
+
+#### 4) M-Step
+?tape **M**: d?termination de $\Phi$ maximisant
+$$ Q\left(\Phi,\Phi^{(c)}\right)=\sum_{i=1}^n\sum_{k=1}^gt_{ik}\log\left(\pi_kf(x_i,\theta_k)\right) $$
+
+Les proportions optimales sont donn?es par:
+$$ \pi_k=\frac{1}{n}\sum_{i=1}^nt_{ik} $$
+Dans le cas du m?lange gaussien avec K=2 et d=1 nous calculons les moyennes/variances:
+$$ \mu_1^{(t+1)}=\Sigma_{i=1}^{n}\frac{\widehat{\eta}^{(t+1)}}{\Sigma_{i=1}^{n}\widehat{\eta}^{(t+1)}}x_i $$
+et
+$$ (\sigma_1^{(t+1)})^{2}=\Sigma_{i=1}^{n}\frac{\widehat{\eta}^{(t+1)}}{\Sigma_{i=1}^{n}\widehat{\eta}^{(t+1)}}(x_i-\mu_1^{(t+1)})^{2} $$
+
+Notre impl?mentation de l'algorithme EM :
+
+```{r}
+algoEMgaussien = function(data, K) {
+  dataSize = length(data)
+  # On d?finit les probabilit?s p(i), moyenne mu et les variances des gaussiennes.
+  p = c()
+  mu = c()
+  sigma = c()
+  eta = matrix(nrow=dataSize, ncol=K) #responsabilit?s de chaque point
+ 
+  # Initialisation des donn?es.
+  for (i in 1:K)
+  {
+    p[i]=1/K
+    mu[i]=data[sample(2:dataSize, 1)] # au hasard dans data
+    sigma[i]=sqrt(var(data))                    
+  }
+    
+  #Initialisation des clusters
+  clusters = rep(1:dataSize)
+  #Variables de condition d'arret
+  newSum=0
+  oldSum=0
+  iterationNumber = 0
+  while(TRUE){
+    #E
+    for (i in 1:K)
+    {
+      eta[,i]=p[i]*dnorm(data, mean=mu[i], sd=sigma[i])
+    }
+    
+     for (l in 1:dataSize)
+    {
+      clusters[l] = which.max(eta[l,]) #le max du vecteur eta
+      eta[l,] = eta[l,]/sum(eta[l,])
+     }
+    
+    # P(Y=k)
+    for (i in 1:K)
+    {
+      cluster = which(clusters == i)
+      p[i]=length(cluster)/dataSize
+    }
+    
+    #M step
+    for (i in 1:K)
+    {
+      cluster = which(clusters == i)
+      #actualisation des moyennes et des deviations
+      mu[i]=sum(data[cluster])/length(cluster)
+      sigma[i]=sqrt(var(data[cluster]))
+    }
+   
+    oldSUm = newSum
+    newSum = 0
+    for (i in 1:K)
+    {
+      cluster = which(clusters == i)
+      newSum = newSum + sum(log(p[i]*dnorm(data[cluster],mu[i],sigma[i])))
+    }
+    iterationNumber=iterationNumber+1
+
+    #message("Iteration ", iterationNumber)
+    #Si un des sigma est proche de z?ro alors nous risquons d'avoir une donn?e par cluster.
+   if(min(sigma)<0.1){
+      message("Overfitting des donn?es ! Variance->0 ", min(sigma))
+      break
+   }
+   if(iterationNumber>100 || abs((newSum-oldSUm)/newSum) <0.000000001 )         
+    {
+      break
+    } 
+  }
+  #On retourne un affichage en liste des probabilit?s, esp?rances, ?carts-type de chacune des gaussiennes, ainsi que le nombre d'it?rations.
+  return (list("Probabilit?s des K gaussiennes: "=p, "Esp?rances des K gaussiennes: "=mu, "Sigma des K gaussiennes"=sigma, "Nombre d'iterations"=iterationNumber))
+}
+
+result=algoEMgaussien(as.vector(irm), 2)
+print(result)
+
+```
+Les probabilit?s obtenues pour K=2 sont proches de 50%.
+On a : $p_1 = 0.483$ et $p_2 = 0.517$. Les moyennes sont proches des observations $mu_1 = 138.39$ et $mu_2 = 227.71$ et les ?carts-type sont $sigma_1 = 24.97$ et $sigma_2 = 18.61$.
+Ces r?sultats confirment la conjecture de nos observations pr?c?dentes.
+
+Histogramme avec nos K=2 gaussiennes : 
+```{r}
+hist(as.vector(irm), prob=TRUE)
+x = seq(min(as.vector(irm)), max(as.vector(irm)))
+
+k1 = 0.483*dnorm(x, mean=138.39, sd=24.97)
+lines(x, k1, col="gold", lwd = 3);
+
+k2 = 0.517*dnorm(x, mean=227.71, sd=18.61)
+lines(x, k2, col="red", lwd = 3);
+```
+
+Pour des K plus grand on observe un ph?nom?ne d'overfit des donn?es.
+```{r}
+print(algoEMgaussien(as.vector(irm), 3))
+print(algoEMgaussien(as.vector(irm), 5))
+```
+
+En conslusion l'utilisation de K=2 gaussienne est pertinante pour le cas ?tudi?.
+
+
+## Mixture de r?gressions par l'algorithme EM
+
+### 5. Chargement de la biblioth?que
+
+Installation et chargement de mixtools :
+```{r}
+library(mixtools)
+```
+
+### 6. Importation des donn?es
+
+Import des donn?es et affichage :
+```{r}
+tab2 = read.table("regression_double.txt", sep=";")
+summary(tab2)
+doubleRegData = as.matrix(tab2)
+plot(doubleRegData[,1],doubleRegData[,2])
+```
+On observe que les donn?es sont r?parties selon deux droites.
+On en d?duit qu'une r?gression lin?aire simple ne conviendra pas.
+On peut en conclure qu'une mixture de K=2 gaussiennes serait un choix judicieux. 
+
+### 7. Mix EM
+R?alisation d'un Mix EM:
+```{r}
+mixmodel = regmixEM(doubleRegData[,1], doubleRegData[,2], k=2)
+```
+
+### 8. Affichage du r?sultat et calcul des r?sidus
+R?sultat du Mix EM avec K=2:
+```{r}
+summary(mixmodel)
+plot(mixmodel, which=2)
+plot(density(doubleRegData), col='blue', ylim=c(0,0.0095), lwd=5)
+```
+
+Au bout d'une quizaine d'it?rations nous obtenons une mixture de deux gaussiennes.
+Ce qui confirme nos attentes.
+
+Calcul des r?sidus:
+```{r}
+print(mixmodel["sigma"][1])
+
+```
+
+
+
+### 9. Mix EM sur 1,3 et 5 it?rations
+
+
+```{r}
+regMix1 = regmixEM(doubleRegData[,1], doubleRegData[,2], k= 2, maxit=1)
+plot(regMix1, which=2)
+
+regMix2 = regmixEM(doubleRegData[,1], doubleRegData[,2], k= 2, maxit=3)
+plot(regMix2, which=2)
+
+regMix3 = regmixEM(doubleRegData[,1], doubleRegData[,2], k= 2, maxit=5)
+plot(regMix3, which=2)
+```
+
+Apr?s 1, 3 et 5 it?rations nous remarquons que l'on tend vers le mod?le, cependant le r?sultat pour un nombre faible d'it?rations est influenc? par la fa?on dont sont initialis?es les moyennes et les ?carts-type dans l'algorithme regmixEM de la biblioth?que mixtools.
+
+
+
+
+
+

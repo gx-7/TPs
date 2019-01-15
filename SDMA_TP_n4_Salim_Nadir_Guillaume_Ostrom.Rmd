@@ -1,0 +1,384 @@
+---
+title: 'TP n°4 - Décomposition en valeurs singulières & Analyse en composantes principales'
+author: "Salim Nadir et Guillaume Ostrom"
+output: pdf_document
+---
+*** 
+
+# Exercice 1 : Décomposition en valeurs singulières
+
+## 1. Simulation d'un vecteur gaussien
+
+Nous simulons un vecteur aléatoire gaussien
+```{r}
+gaussian_50_5 = matrix(rnorm(50*5),ncol = 5, nrow = 50)
+```
+
+## 2. Matrice de covariance
+
+Nous calculons la matrice de covariance empirique.
+```{r}
+S = cov(gaussian_50_5)
+print(S)
+```
+La matrice obtenue est carré de taille 4 symétrique à coefficients réels. 
+Nous remarquons que la variance des vecteurs n'est pas de 1 alors qu'ils ont été générés par des loi normales i.i.d.
+Il faut donc la générer avec d'avantages de données car quand n tend vers l'infini on tend vers la matrice identité.
+
+## 3. Décomposition en valeurs singulières
+
+La décomposition en valeurs singulère de S de taille n,p implique l'existence de U de taille n,n et V de taille p,p matrices carrés orthogonales réelles et de SIGMA une matrice diagonale de taille n,p de termes croissants, tel que:
+$$S = U \Sigma V^T$$
+
+```{r}
+svds=svd(S)
+U = svds$u
+print(U)
+V = svds$v
+print(V)
+SIGMA = diag(svds$d)
+print(SIGMA)
+```
+
+## 4. $\Sigma$, U, V et comparaisons
+
+La diagonale de la matrice $\Sigma$ comporte les valeurs singulières de $S$ par ordre décroissant.
+
+Une comparaison peut être :
+```{r}
+print(U-V)
+print(U%*%t(V))
+```
+On peut aussi utiliser la norme, la norme spectrale et la norme infinie:
+```{r}
+norm(U-V)
+norm(U-V,"2")
+norm(U-V,"I")
+```
+Les normes devraient être égales à 0, mais nous obtenons des résultats de l'odre de $10^-15$ pour les deux normes.
+La différence doit provenir d'approximations numériques.
+
+
+```{r}
+print(sum(diag(S)))
+print(sum(diag(SIGMA)))
+```
+Nous observons que les traces sont identiques car U et V sont des matrices orthogonales de changement de base.
+
+## 5. Calcul de $U \Sigma V^T$ et remarques.
+
+Nous calculons $U \Sigma V^T$ :
+```{r}
+print(U%*%SIGMA%*%t(V))
+print(norm(U%*%SIGMA%*%t(V)-S,'2'))
+```
+Les deux matrices sont quasiment identiques à $10^-16$ près.
+La différence doit provenir d'approximations numériques.
+
+
+
+# Exercice 2 : Analyse en composantes principales
+
+## Analyse préliminaire
+
+```{r}
+#install.packages("ade4")
+library(ade4)
+```
+
+## 1. Analyse rapide
+
+Les données contenues dans *cardata.txt* sont des caractéristiques de modèles d'automobiles.
+Il n'y a pas beaucoup de données et elles sont présentes dans des unités différentes et d'ordre de grandeur différents. 
+Nous devrons donc normaliser celles-ci.
+
+## 2. Dataframe $X$
+
+Récupérons les données :
+```{r}
+setwd("D:\\Centrale\\OMA\\SDMA\\TP4\\")
+X=read.table('cardata.txt',sep=';',header=TRUE,row.names = 'model')
+nrow(X)
+#header(X)
+row.names(X)
+ncol(X)
+```
+Nous observons 6 variables explicatives sur 24 modèles de voitures.
+
+## 3. Caractérisation
+
+
+Affichons le graphique de données:
+```{r}
+plot(X)
+```
+Nous observons de fortes corrélations entre puissance et vitesse mais aussi entre poids longeur et largeur.
+Globalement les varaibles sont corrélées.
+
+```{r}
+cor(X)
+```
+Nous constatons ces fortes corrélations dans la matrice de covariance.
+Les coefficients proches de 1 indiquent de très forte corrélations entre les variables.
+Ainsi cylindrée et poids, longueur et poids, puissance et vitesse, cylindrée et puissance sont entre autres fortement corrélés.
+
+Nous pouvons mettre en évidence ces corrélations avec corrplot:
+```{r}
+library(corrplot)
+corrplot(cor(X))
+```
+
+Nous devons utiliser l'analyse en composante principale pour réduire la dimension et décorréler les variables entre elles-mêmes.
+
+
+## 4. Analyse en Composante Principale
+
+Nous réalisons une ACP sur des données normalisées :
+```{r}
+res = prcomp(X,center = TRUE,scale = TRUE)
+```
+
+Caractérisons les résulats:
+```{r}
+attributes(res)
+```
+
+L'écart type des composantes principales:
+```{r}
+res$sdev
+```
+Nous obtenons la matrice des valeurs propres par ordre décroissant.
+
+Matrice des vecteurs propres:
+```{r}
+res$rotation
+```
+Chaque colonne est lié à une des composantes principale.
+
+Vérifions que nous obtenons la matrice identité
+```{r}
+res$rotation%*%t(res$rotation)
+```
+à $10^-17$ près nous obtenons la matrice identité.
+
+Centrons les données:
+```{r}
+res$center
+```
+
+Normalisons:
+```{r}
+res$scale
+```
+
+Affichons les valeurs centrées, normalisées dans la base des composantes principales:
+```{r}
+res$x
+```
+
+## 5. Etude des Valeurs propres
+
+```{r}
+cumsum((res$sdev**2)/6)
+
+```
+Il faut donc conserver 3 composantes principales pour expliquer 95% de la variance.
+Et 4 composantes principales pour expliquer 98%.
+
+## 6. Etude des Valeurs propres
+
+Voici les coordonnées des axes principaux dans l'ancienne base:
+```{r}
+res$rotation
+```
+
+Nous observons que les pondérations sont importantes pour les variables explicatives les plus importante en valeur absolue:
+```{r}
+res$rotation[,1:4]
+```
+
+## 7. Analyse des individus projetés et cercle des corrélations
+
+Sur le premier plan factoriel nous obtenons:
+```{r}
+biplot(res,choices = c(1,2))
+```
+Nous remarquons que les sportives sont projetées sur la partie supérieur.
+Aussi, les familiales sont concentrées sur la partie centrale.
+
+Sur le deuxième plan factoriel nous obtenons:
+```{r}
+biplot(res,choices = c(2,3))
+```
+On observe que les distances entre chaque points sont inférieurs.
+Nous remarquons que les données sont plus étalées sur le plan factoriel n°1 que sur le n°2 car le premier explique une plus grande part de la variance.
+
+Sur le troisième plan factoriel nous obtenons:
+```{r}
+biplot(res,choices = c(1,3))
+```
+Il parait plus complexe de distinguer les groupes.
+
+Ensuite, nous réalisons une ACP avec *ade4*.
+```{r}
+#install.packages("ade4")
+library(ade4)
+pca = dudi.pca(X, scan=F)
+s.corcircle(pca$co)
+```
+Nous observons que les correlations sont données par les angles entre les vecteurs.
+
+## 8. Classification non-supervisée (Kmeans)
+
+Nous implémentons l'algorithme Kmeans pour chaque classes de données tel que  :
+
+```{r}
+for (k in c(1,2,3,4)){
+  result = kmeans(X, k)
+  result$centers
+    print(result$centers)
+  result$cluster
+    print(result$cluster)
+  result$withinss
+    print(result$withinss)
+  result$betweenss
+    print(result$betweenss)
+}
+```
+
+
+# Exercice 3 : Caractères manuscrits
+
+## Partie A
+```{r}
+load("digits3-8.RData")
+```
+
+### 1. Définition de la fonction mImage
+
+```{r}
+mImage = function(vect)
+{
+  image(t(matrix(vect,16,16)), axes=FALSE, col = gray(0:255/255))
+}
+```
+
+
+```{r}
+mImage(d3[1,])
+mImage(d8[1,])
+```
+Nous observons les chiffres 3 et 8 manuscritement écrit.
+
+## Partie B
+
+### 2. Sélection des données
+
+```{r}
+data = 1:nrow(d3)
+train = sample(nrow(d3), 1000)
+test = data[is.na(pmatch(data, train))]
+d3train = d3[train,]
+d3test = d3[test,]
+d8train = d8[train,]
+d8test = d8[test,]
+```
+
+### 3. "3" & "8" moyens
+
+Affichons les 3 et 8 moyens:
+```{r}
+mean3 = colMeans(d3train,1)
+mImage(mean3)
+mean8 = colMeans(d8train,1)
+mImage(mean8)
+```
+
+### 4. Matrices de covariances.
+
+Voici les matrices de covariances :
+```{r}
+d3train = t(scale(t(d3train)))
+d8train = scale(d8train)
+cov_3 = cov(d3train)
+cov_8 = cov(d8train)
+#print(cov_3)
+#print(cov_8)
+```
+
+### 5. Composantes principales
+
+La relation est 
+$$ les valeurs propres de la matrice de covariance = \frac{1}{n} (valeurs singulière de d3train )^2 $$
+```{r}
+svd3=svd(d3train)$d
+eigen3=eigen(cov_3)$values
+```
+
+La relation est bien vérifiée:
+```{r}
+norm(as.matrix(svd3^2-eigen3*999))
+norm(as.matrix(svd3^2-eigen3*999),"2")
+```
+Nous obtenons un résultat à $10^-10$, la relation est vérifiée à l'erreur numérique près.
+
+Pour 8 on obtient :
+```{r}
+svd8=svd(d8train)$d
+eigen8=eigen(cov_8)$values
+```
+
+```{r}
+norm(as.matrix(svd8^2-eigen8*999))
+norm(as.matrix(svd8^2-eigen8*999),"2")
+```
+Nous obtenons un résultat à $10^-10$, la relation est vérifiée à l'erreur numérique près.
+
+### 6. Modes propres
+```{r}
+eigen3_mp=eigen(cov_3)$vectors
+eigen8_mp=eigen(cov_8)$vectors
+```
+
+```{r}
+mImage(eigen3_mp[,1])  
+mImage(eigen3_mp[,10])  
+mImage(eigen3_mp[,100])  
+```
+
+```{r}
+mImage(eigen8_mp[,1])  
+mImage(eigen8_mp[,10])  
+mImage(eigen8_mp[,100]) 
+```
+On reconnait les formes d'un 3 et d'un 8. Mais cela s'estompe selon la décroissance du mode propres.
+
+### 7. Matrice de projection
+Calculons la matrice de projection sur le sous espace vectoriel engendré par les 5 premières composantes.
+```{r}
+projection3 = rbind(t(eigen3_mp[,1:5]),matrix(0,nr = 251, ncol = 256));
+max(abs(projection3%*%projection3 - projection3))
+```
+Il s'agit bien de la matrice de projection de 3.
+
+```{r}
+projection8 = rbind(t(eigen8_mp[,1:5]),matrix(0,nr = 251, ncol = 256));
+max(abs(projection8%*%projection8 - projection8))
+```
+Il s'agit bien de la matrice de projection de 8.
+
+### 8. Reconstruction des images
+
+Une méthode de reconstruction permet à l'aide des coordonnées sur les 5 composantes principales seulement de reconstruire des images qui seront de moins bonnes qualité que les images originales mais qui nécessiteront moins d'informations pour leur stockage.   
+Etapes:   
+1) Normalisation en utilisant les matrices de projection dans la base des vecteurs propres.   
+2) Stockage  
+3) Reconstruction avec la matrice inverse   
+
+Avec cette méthode nous obtenons un gain de 256x256 à 5x256 valeurs.
+
+
+
+
+
+
