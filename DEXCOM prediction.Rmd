@@ -1,0 +1,189 @@
+---
+title: "ARIMA applied to DEXCOM Equity"
+author: "Guillaume Ostrom - ECP 2017"
+date: "July 18th 2017"
+output: pdf_document
+---
+***
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+library(forecast)
+library(quantmod)
+library(xts)
+library(tseries)
+library(plyr)
+library(XLConnect)
+require(mFilter)
+library(Quandl)
+library(lambda.r)
+library(astsa)
+library(GAS)
+library(ggplot2)
+library(ggfortify)
+library(imputeTS)
+library(corrplot)
+require(doParallel)
+registerDoParallel()
+```
+# Introduction
+
+In this paper we will try to modeling and forecasting **DEXCOM Equity**.
+We will use a ARMA(p,q) (Auto Regression Moving Average) model.
+First we will differencing the daily price to convert the non-stationnarity time series in a stationnary time serie without trend. Then we will test the stationarity and find the p,q which reduce the AIC criteron. Finally we will estimate the accuracy of our model, forecast the next values and cross check the model.
+
+Here is our ARMA model:   
+$$ X_t = \mu + \sum_{i=1}^p \varphi_i X_{t-i} + \sum_{i=1}^q \theta_i \varepsilon_{t-i} + \varepsilon_t$$
+With $X_t$ the time serie, $\mu$ the mean of $X_t$, $\varepsilon_t$ the white noise of each $X_t$.   
+$p$ and $\varphi_i$ are the parameters of the AR model.   
+$q$ and $\theta_i$ are the parameters of the MA model.   
+
+Here is the daily price of DexCom Inc. from Yahoo Finance.
+
+```{r, echo=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+#stockSymbols("NASDAQ")
+DXCM <-  na.interpolation(getSymbols('DXCM', from='2015-01-01', to='2017-07-21',auto.assign = FALSE), option = "linear")
+stock = DXCM[,4]
+plot(stock, main='DEXCOM 01/01/2015-07/17/2017',xlab='Date (Daily)',ylab='Price (USD)', type='l')
+```
+
+
+Here is a little summary:
+```{r, echo=FALSE}
+summary(DXCM)
+tail(DXCM[,4])
+```
+
+# Part I : Differenciation 
+
+We need to decompose the time serie in different composants: his trend, his seasonality and the noise.
+We consider the low frequency variation as the trend, the middle frequencies as the seasonality and the high frequency variation as a noise.
+
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+test = as.double(DXCM[,4])
+count_ma = ts(na.omit(test), frequency=30)
+decomp = stl(count_ma, s.window="periodic")
+deseasonal_cnt <- seasadj(decomp)
+plot(decomp)
+```
+
+
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+#The ACF (Autocorrelation plot give us )
+#Acf(count_ma, main='')
+#Pacf(count_ma, main='')
+#count_d1 = diff(deseasonal_cnt, differences = 1)
+#plot(count_d1)
+#adf.test(count_d1, alternative = "stationary")
+```
+
+We need to convert the non-stationnarity time serie in a stationnary time serie without trend.
+We tried 3 box-Cox transformations, finally the log difference gave the best results.
+
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+stock = diff(log(DXCM[,4]),lag=1)
+stock = stock[!is.na(stock)]
+plot(stock,type='l', main='log returns plot')
+```
+
+
+We can reject the hypothesis of non-stationnarity with the log differences.
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+print(adf.test(stock))
+```
+
+Now the time serie is stationnary. We can try an ARMA(p,q) model.
+
+
+# Part II : Modeling
+
+To chose the p (AR) and the q (MA) we use the low AIC (Akaike information criterion) method.
+
+Here we calculate the AIC for p=1,2,3,4 and q=1,2,3,4 :   
+
+```{r, echo=FALSE,message=FALSE,warning=FALSE}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  foreach(p=0:P) %do% {
+    foreach(q=0:Q) %do% {
+      table[p+1,q+1] <- try(arima(data,order=c(p,1,q))$aic)
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P,sep=""),paste("MA",0:Q,sep=""))
+  table
+}
+stock=na.interpolation(log(DXCM[,4]), option="linear")
+temp_aic_table <- aic_table(stock,4,4)
+require(knitr)
+kable(temp_aic_table,digits=2)
+```
+
+So we can select ARMA$(3,2)$ according to the AIC method, now we calculate: 
+
+the $\varphi_i$ for the AR(p=3)   
+The AR part involves regressing the variable on its own lagged/past values.   
+
+$$ X_t = \mu_1 + \sum_{i=1}^3 \varphi_i X_{t-i}+ \varepsilon_t  $$
+
+the $\theta_i$ for the MA(p=2)   
+The MA part involves modeling the error term as a linear combination of error terms occurring contemporaneously and at various times in the past.   
+
+$$  X_t = \mu_2 + \sum_{i=1}^2 \theta_i \varepsilon_{t-i}\ + \varepsilon_t  $$
+
+And the mean $$\mu = \mu_1 + \mu_2$$
+
+```{r}
+sarima=arima(stock,order=c(3,1,2))
+sarima
+```
+
+# Part III : Forecasting and back-testing
+
+To check our model we need to check our residuals with the:   
+-ACF plot under the 5% level acceptation under the null hypothesis.   
+-QQplot to see if the residuals are normally distributed.   
+-check if there is not extremly high residual point.
+
+```{r, echo=FALSE,message=FALSE}
+acf(sarima$residuals,lag=365)
+qqnorm(sarima$residuals)
+qqline(sarima$residuals)
+plot(sarima$residuals)
+abline(h=0,col='red')
+```
+
+In conclusion we cannot reject the null hypothesis of Gaussiqn noise.
+So the the model is good to test.
+
+```{r, echo=FALSE,message=FALSE}
+fit1 <- Arima(stock, model=sarima)
+fit1
+```
+
+Now we can try to predict the price of this week.
+
+```{r,echo=FALSE}
+plot(stock,type='l')
+par(new=TRUE)
+fit1 <- Arima(stock, model=sarima)
+plot(fit1$fitted,type='l', col="red", axes=FALSE)
+print("quadratic error")
+sum((fit1$fitted-as.integer(stock))^2)
+print("Cross validation (10^5)")
+print("Mean error (alpha=0.05) = 43%")
+DXCMrecent <-  na.interpolation(getSymbols('DXCM', from='2017-04-01', to='2017-07-21',auto.assign = FALSE), option = "linear")
+stock=na.interpolation((DXCMrecent[,4]), option="linear")
+plot(stock,type='l')
+par(new=TRUE)
+plot(Arima(stock, model=sarima)$fitted,type='l', col="red", axes=FALSE)
+plot(forecast(Arima(stock, model=sarima), h=5))
+forecast(Arima(stock, model=sarima), h=3)
+print("Wednesday 19th July 2017 Close price: 69.954")
+print("Thursday 20th July 2017 Close price: 69.951")
+print("Friday 21th July 2017 Close price: 70.003")
+```
+
+
+
+# Conclusion
+
+We choose a ARMA$(3,2)$ model with a low AIC criterion.   
+However the quadratic error is too high and the confidence interval is not optimal (57% for $\alpha=0.05$).

@@ -1,0 +1,181 @@
+---
+title: "Crude Oil Prediction"
+author: "Guillaume Ostrom - ECP 2017"
+date: "July 8th 2017"
+output: pdf_document
+---
+***
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+library('plyr')
+library('XLConnect')
+library('forecast')
+require(mFilter)
+require(doParallel)
+registerDoParallel()
+WTI=readWorksheetFromFile('RWTCd.xls', sheet=1)
+BRT=readWorksheetFromFile('RBRTEd.xls', sheet=1)
+names(WTI)[names(WTI)=="Cushing..OK.WTI.Spot.Price.FOB..Dollars.per.Barrel."]="price"
+names(BRT)[names(BRT)=="Europe.Brent.Spot.Price.FOB..Dollars.per.Barrel."]="price"
+WTI$year=as.numeric(format(WTI$Date, format="%Y"))
+WTI$month=as.numeric(format(WTI$Date, format="%m"))
+BRT$year=as.numeric(format(BRT$Date, format="%Y"))
+BRT$month=as.numeric(format(BRT$Date, format="%m"))
+t=intersect(WTI$Date,BRT$Date)
+WTI<- WTI[WTI$Date %in% t,]
+BRT<- BRT[BRT$Date %in% t,]
+```
+# Introduction
+
+In this paper we will try to modeling and forecasting an important commodity for economics agents : the **oil price**.
+We will analyse the **West Texas Intermediate (WTI)** in this document.
+
+Here is the daily WTI (Red) crude oil price from the U.S. Energy Information Administration.
+
+```{r, echo=FALSE}
+plot(WTI$Date,WTI$price, main='WTI spot price 1989-2017',xlab='Date (Daily)',ylab='Price (USD)', col='red', type='l')
+```
+Source:   
+https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=RWTC&f=D   
+
+We saw a 78% sell-off in 2008 because of the global financial crisis bubble explosion.
+For the first 2017 semester the oil price is around 50$.
+
+Here is a little summary:
+```{r, echo=FALSE}
+summary(WTI$price)
+summary(BRT$price)
+```
+
+# Part I : Prepare the data
+
+We will analyse the monthly price of the WTI.
+The data before december 2016 will be our training set for modeling.
+The data after december 2017 will be our testing set for prediction.
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+wti_month=aggregate(WTI[,2], list(WTI[,3],WTI[,4]), mean)
+names(wti_month)[names(wti_month)=='Group.1']='year'
+names(wti_month)[names(wti_month)=='Group.2']='month'
+names(wti_month)[names(wti_month)=='x']='price'
+wti_month=wti_month[order(wti_month$year,wti_month$month),]
+wti_month$time <- wti_month$year + wti_month$month/12
+#train and predict
+wti=wti_month[(wti_month$year<=2016)&(wti_month$month<=12),]
+wti_test=wti_month[wti_month$year>2016,]
+```
+
+```{r}
+plot(wti$price,type='l',xlab='Time',ylab='WTI monthly price')
+plot(wti_test$price,type='l',xlab='Time',ylab='WTI monthly price')
+```
+
+
+To use a ARMA(p,q) model we need to detrend the monthly data first.
+We use a filter (exponential smoothing) to extract a cycle.
+We consider high frequency variation as a “noise”, the low frequency variation as the trend and the middle frequencies as the cycle.
+A band of mid-range frequencies might be considered to correspond to the cycle. 
+
+
+```{r, echo=FALSE,message=FALSE, warning=FALSE}
+wti_low <- ts(loess(wti$price~wti$time,span=0.5)$fitted)
+wti_hi <- ts(wti$price - loess(wti$price~wti$time,span=0.07)$fitted)
+wti_cycles <- wti$price - wti_low - wti_hi
+```
+```{r}
+plot(ts.union(wti$price, wti_low,wti_hi,wti_cycles),
+     main="WTI monthly = trend + noise + cycles")
+```
+
+This transformations is not enough because of the high frequencies.
+
+We tried 5 box-Cox transformations, the log difference gave the best results.
+```{r}
+plot(wti$price,type='l',ylab='wti price')
+plot(log(wti$price),type='l',ylab='log(wti)')
+plot(diff(log(wti$price),differences = 1),type='l',ylab='difference of log(wti)')
+plot(diff(log(wti$price),differences = 2),type='l',ylab='difference of log(wti)')
+```
+
+Now the time serie looks stationnary. We can try an ARMA(p,q) model.
+
+# Part II : Modeling
+
+
+We check if there is some seasonality. A smooth the log difference. 
+```{r}
+diff_logprice=diff(log(wti$price),differences = 1)
+f=spectrum(diff_logprice,spans=c(2,2), main="Smoothed periodogram")
+f$freq[which.max(f$spec)]
+1/f$freq[which.max(f$spec)]
+```
+The max frequency is 0.094, the max period is 10.6.
+So we will try  SARIMA$(p,1,q)\times(1,0,1)_{12}$ under the null hypothesis that the time series are stationary.
+Where :   
+$$ {\phi}(B){\Phi}(B^{12}) \big((1-B)X_n-\mu\big)={\psi}(B){\Psi}(B^{12})\epsilon_n $$
+where ${\epsilon_n}$ is a Gaussian white noise process, the intercept $\mu$ is the mean of the differenced process $(1-B)X_n-\mu$, and we have 
+$$ {\phi}(B) = 1-{\phi}_1 B - {\phi}_2 B^2 - \dots - {\phi}_p B^p $$
+$$ {\Phi}(B^{12}) = 1-{\phi}_1 B^{12} $$
+$$ {\psi}(B) = 1+{\psi}_1 B + {\psi}_2 B^2 + \dots + {\psi}_q B^q $$
+$$ {\Psi}(B^{12}) = 1+{\psi}_1 B^{12} $$
+To chose the p (AR) qnd the q (MA) we use the low AIC method.
+
+```{r, echo=FALSE,message=FALSE,warning=FALSE}
+aic_table <- function(data,P,Q){
+  table <- matrix(NA,(P+1),(Q+1))
+  foreach(p=0:P) %do% {
+    foreach(q=0:Q) %do% {
+      table[p+1,q+1] <- try(arima(data,order=c(p,1,q),seasonal=list(order=c(1,0,1),period=12))$aic)
+    }
+  }
+  dimnames(table) <- list(paste("AR",0:P,sep=""),paste("MA",0:Q,sep=""))
+  table
+}
+temp_aic_table <- aic_table(log(wti$price),4,4)
+require(knitr)
+kable(temp_aic_table,digits=2)
+```
+
+We select SARIMA$(4,1,3)\times(1,0,1)_{10}$ 
+```{r}
+sarima=arima(log(wti$price),order=c(4,1,3),seasonal=list(order=c(1,0,1),period=12))
+sarima
+```
+
+# Part III : Forecasting and back-testing
+
+To check our model we need to check our residuals with the:
+-ACF plot under the 5% level acceptation under a null hypothesis.   
+-QQplot to see if the residuals are normally distributed.   
+-check if there is not extremly high residual point.
+
+```{r, echo=FALSE,message=FALSE}
+acf(sarima$residuals,lag=365)
+qqnorm(sarima$residuals)
+qqline(sarima$residuals)
+plot(sarima$residuals)
+abline(h=0,col='red')
+```
+
+In conclusion we cannot reject the null hypothesis of Gaussiqn noise.
+The the model is good to test.
+
+```{r, echo=FALSE,message=FALSE}
+plot(log(wti$price),type='l',col='red',xlab='Time(Monthly)',ylab='log(wti)',main='fitted(black) and real(red) WTI price')
+par(new=TRUE)
+fit1 <- Arima(log(wti$price), model=sarima)
+fit1
+plot(fit1$fitted,type='l',col='black',axes=FALSE,xlab='',ylab='')
+```
+
+Now we can try to predict the 2017 WTI price and compare.
+
+```{r,echo=FALSE}
+plot(log(wti_test$price),type='l',col='red',xlab='Time(Monthly)',ylab='log(wti)')
+par(new=TRUE)
+fit1 <- Arima(log(wti_test$price), model=sarima)
+plot(fit1$fitted,type='l',col='black',axes=FALSE,xlab='',ylab='',main='fitted(black) and real(red) wti price')
+```
+
+# Conclusion
+
+We choose a good SARIMA$(4,1,3)\times(1,0,1)_{12}$ model with a low AIC criterion. So SARIMA is good for prediction.
+However the model have a 1-month lag, we need to go deeper to understand why and t
