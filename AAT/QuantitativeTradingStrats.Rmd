@@ -26,14 +26,10 @@ library(rugarch)
 
 ```{r}
 
-library(quantmod)
-library(lattice)
-library(timeSeries)
-library(rugarch)
-# Obtain the S&P500 returns and truncate the NA value
 getSymbols("^GSPC", from="2017-01-01")
 spReturns = diff(log(Cl(GSPC)))
 spReturns[as.character(head(index(Cl(GSPC)),1))] = 0
+
 # Create the forecasts vector to store the predictions
 windowLength = 500
 foreLength = length(spReturns) - windowLength
